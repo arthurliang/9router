@@ -21,6 +21,9 @@ const STRIP_RULES = [
   // "integer above maximum value, expected <= 32768". Pin an explicit endpoint cap;
   // min() with the model ceiling still applies if a variant's own limit is lower.
   { provider: "volcengine-ark", match: /kimi/i, maxOutputCap: 32768, clampToModelMaxOutput: true },
+  // 星火社区 (xh): 极简 OpenAI 兼容层, 拒收一切 max tokens 参数 (HTTP 400 unsupported_parameter)。
+  // 匹配 xh/ 前缀模型 (openai_huoshan_*/openai_doubao_*), 不依赖动态 provider id。
+  { match: /^xh\/openai_(huoshan|doubao)/i, drop: ["max_tokens", "max_completion_tokens", "max_output_tokens"] },
 ];
 
 // Test a rule's match (regex or predicate) against the model id.
