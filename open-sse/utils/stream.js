@@ -60,8 +60,11 @@ function createResponsesIndexRemapper() {
       return;
     }
     // Collision: same original index, different item identity → fresh slot.
+    // Re-bind byIndex[idx] to the new identity so any later events sharing the
+    // same original index but an unseen identity chain to fresh slots too.
     const slot = nextSlot++;
     byId.set(id, slot);
+    byIndex.set(idx, { slot, id });
     parsed.output_index = slot;
   };
   const captureItem = (parsed) => {
