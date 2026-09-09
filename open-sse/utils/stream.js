@@ -283,7 +283,9 @@ export function createSSEStream(options = {}) {
                 }
               }
 
-              if (!hasValuableContent(parsed, FORMATS.OPENAI)) {
+              // Responses events (type=response.*) carry no chat-completions
+              // shape and are valuable as-is; only gate chat-shaped chunks.
+              if (!parsed.type?.startsWith?.("response.") && !hasValuableContent(parsed, FORMATS.OPENAI)) {
                 continue;
               }
 
