@@ -223,9 +223,16 @@ export function createSSEStream(options = {}) {
               // and omit earlier items from terminal snapshots. Strict clients
               // (OpenClaw) abort on index/identity collisions. Identity-aware remap:
               // pass-through for compliant upstreams; only collisions get new slots.
+              // Re-serialize from the parsed object whenever we touched it — the
+              // raw-line fallback below would otherwise discard the remap.
               if (parsed && typeof parsed === "object" &&
                   (parsed.type?.startsWith?.("response.") || typeof parsed.output_index === "number" || parsed.item_id)) {
+                const before = parsed.output_index;
                 remapResponsesOutputIndex(parsed, remapResponsesIndex);
+                if (parsed.output_index !== before || parsed._responsesRemapped) {
+                  fieldsInjected = true;
+                  parsed._responsesRemapped = true;
+                }
               }
 
               const idFixed = fixInvalidId(parsed);
