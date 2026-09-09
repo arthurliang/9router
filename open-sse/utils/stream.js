@@ -219,6 +219,15 @@ export function createSSEStream(options = {}) {
             try {
               const parsed = JSON.parse(trimmed.slice(5).trim());
 
+              // Spark-hub-style upstreams restart output_index at 0 per output item
+              // and omit earlier items from terminal snapshots. Strict clients
+              // (OpenClaw) abort on index/identity collisions. Identity-aware remap:
+              // pass-through for compliant upstreams; only collisions get new slots.
+              if (parsed && typeof parsed === "object" &&
+                  (parsed.type?.startsWith?.("response.") || typeof parsed.output_index === "number" || parsed.item_id)) {
+                remapResponsesOutputIndex(parsed, remapResponsesIndex);
+              }
+
               const idFixed = fixInvalidId(parsed);
 
               // Ensure OpenAI-required fields are present on streaming chunks (Letta compat)
