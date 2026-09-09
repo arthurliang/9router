@@ -72,10 +72,10 @@ function createResponsesIndexRemapper() {
     }
   };
   const rebuildSnapshot = (response) => {
-    // Rebuild whenever captured stream items diverge from the terminal snapshot.
-    // Spark-hub omits earlier items (e.g. message before function_call) from the
-    // completed snapshot, which strict clients treat as incomplete output.
     if (!response || !Array.isArray(response.output) || items.size === 0) return;
+    if (process.env.NINEROUTER_REMAP_DEBUG) {
+      console.error("[REBUILD-PROBE] items=" + [...items.entries()].map(([k, v]) => k + ":" + v.type + ":" + String(v.id).slice(0, 10)).join(",") + " | snapshot=" + response.output.map(o => o.type + ":" + String(o.id).slice(0, 10)).join(","));
+    }
     if (items.size === response.output.length &&
         [...items.values()].every((item, i) => response.output[i] === item || response.output[i]?.id === item.id)) return;
     response.output = [...items.entries()].sort((a, b) => a[0] - b[0]).map(([, item]) => item);
