@@ -230,17 +230,23 @@ export function createSSEStream(options = {}) {
               // pass-through for compliant upstreams; only collisions get new slots.
               // Re-serialize from the parsed object whenever we touched it — the
               // raw-line fallback below would otherwise discard the remap.
+              let remappedFields = false;
               if (parsed && typeof parsed === "object" &&
                   (parsed.type?.startsWith?.("response.") || typeof parsed.output_index === "number" || parsed.item_id)) {
                 const before = parsed.output_index;
                 remapResponsesOutputIndex(parsed, remapResponsesIndex);
-                if (parsed.output_index !== before || parsed._responsesRemapped) {
-                  fieldsInjected = true;
-                  parsed._responsesRemapped = true;
+                if (parsed.output_index !== before) {
+                  remappedFields = true;
                 }
+                if (parsed.type === "response.completed" || parsed.type === "response.incomplete") {
+                  // Snapshot may have been rebuilt (items re-added) — always re-serialize.
+                  remappedFields = true;
+                }
+                parsed._responsesRemapped = true;
               }
 
               const idFixed = fixInvalidId(parsed);
+              if (remappedFields) fieldsInjected = true;
 
               // Ensure OpenAI-required fields are present on streaming chunks (Letta compat)
               let fieldsInjected = false;
