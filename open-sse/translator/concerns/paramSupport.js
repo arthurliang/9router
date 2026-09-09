@@ -24,7 +24,8 @@ const STRIP_RULES = [
   // 星火社区 (xh): 极简 OpenAI 兼容层, 拒收一切 max tokens 参数 (HTTP 400 unsupported_parameter),
   // 且只接受纯字符串 content(不接受 OpenAI content-part 数组, 400 unsupported_content)。
   // 9router 转发上游前会去掉 xh/ 前缀, strip 收到的是纯模型名 openai_huoshan_*/openai_doubao_*。
-  { match: /^openai_(huoshan|doubao)/i, flattenContent: true, drop: ["max_tokens", "max_completion_tokens", "max_output_tokens"] },
+  // Responses 透传补充: 星火还拒 metadata / top_p(OpenClaw turnState 可能携带 metadata)。
+  { match: /^openai_(huoshan|doubao)/i, flattenContent: true, drop: ["max_tokens", "max_completion_tokens", "max_output_tokens", "metadata", "top_p"] },
 ];
 
 // Test a rule's match (regex or predicate) against the model id.
