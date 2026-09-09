@@ -231,6 +231,7 @@ export function createSSEStream(options = {}) {
               // Re-serialize from the parsed object whenever we touched it — the
               // raw-line fallback below would otherwise discard the remap.
               let remappedFields = false;
+              let fieldsInjected = false;
               if (parsed && typeof parsed === "object" &&
                   (parsed.type?.startsWith?.("response.") || typeof parsed.output_index === "number" || parsed.item_id)) {
                 const before = parsed.output_index;
@@ -249,7 +250,6 @@ export function createSSEStream(options = {}) {
               if (remappedFields) fieldsInjected = true;
 
               // Ensure OpenAI-required fields are present on streaming chunks (Letta compat)
-              let fieldsInjected = false;
               if (parsed.choices !== undefined) {
                 if (!parsed.object) { parsed.object = "chat.completion.chunk"; fieldsInjected = true; }
                 if (!parsed.created) { parsed.created = Math.floor(Date.now() / 1000); fieldsInjected = true; }
