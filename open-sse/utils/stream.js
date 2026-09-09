@@ -26,6 +26,17 @@ function createResponsesIndexRemapper() {
   const byIndex = new Map(); // original output_index -> { slot, id }
   const byId = new Map();    // item id/call_id -> slot (unique per response)
   const items = new Map();   // remapped slot -> full item (from output_item.done)
+  const usedSlots = new Set(); // every slot ever allocated (preserved or fresh)
+  // Slots allocated to collision items must never be handed out again. A later
+  // event whose original index happens to equal an already-allocated slot (e.g.
+  // spark-hub sends msg@0, fc1@0, fc2@1 — fc1 collides to slot 1, then fc2's
+  // original 1 must NOT reuse it) would otherwise silently merge two items.
+  const allocSlot = () => {
+    while (usedSlots.has(nextSlot)) nextSlot++;
+    const slot = nextSlot++;
+    usedSlots.add(slot);
+    return slot;
+  };
   const identityOf = (parsed) => {
     const item = parsed.item;
     if (item && typeof item === "object") {
@@ -47,22 +58,36 @@ function createResponsesIndexRemapper() {
     }
     const bound = byIndex.get(idx);
     if (!bound) {
-      // Fresh original index → new item; preserve upstream numbering.
-      byIndex.set(idx, { slot: idx, id: id ?? null });
-      if (id) byId.set(id, idx);
-      if (idx >= nextSlot) nextSlot = idx + 1;
-      parsed.output_index = idx;
+      // Fresh original index → new item; preserve upstream numbering unless the
+      // slot was already taken by a collision allocation.
+      let slot;
+      if (!usedSlots.has(idx)) {
+        slot = idx;
+        usedSlots.add(idx);
+        if (idx >= nextSlot) nextSlot = idx + 1;
+      } else {
+        slot = allocSlot();
+      }
+      byIndex.set(idx, { slot, id: id ?? null });
+      if (id) byId.set(id, slot);
+      parsed.output_index = slot;
       return;
     }
     if (!id || bound.id === null || bound.id === id) {
       // Same item continuing (or unidentifiable delta) → keep its slot.
+      // Learn the identity when we only had an anonymous binding so far, so a
+      // later distinct identity at the same original index collides properly.
+      if (id && bound.id === null) {
+        bound.id = id;
+        byId.set(id, bound.slot);
+      }
       parsed.output_index = bound.slot;
       return;
     }
     // Collision: same original index, different item identity → fresh slot.
     // Re-bind byIndex[idx] to the new identity so any later events sharing the
     // same original index but an unseen identity chain to fresh slots too.
-    const slot = nextSlot++;
+    const slot = allocSlot();
     byId.set(id, slot);
     byIndex.set(idx, { slot, id });
     parsed.output_index = slot;
