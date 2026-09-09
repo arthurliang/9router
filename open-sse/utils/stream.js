@@ -14,6 +14,83 @@ export { SSE_DONE, SSE_HEADERS, SSE_HEADERS_NO_BUFFER };
 // sharedEncoder is stateless — safe to share across streams
 const sharedEncoder = new TextEncoder();
 
+// Per-stream identity-aware remapper for Responses events whose upstream reuses
+// output_index across distinct output items (e.g. spark-hub restarts at 0 per
+// item). Strict clients (OpenClaw) abort with "Responses stream changed output
+// item identity" when an index they bound to one item reappears with another.
+// Preserves original indices for compliant (monotonic) upstreams, allocates
+// fresh slots only on identity collisions, captures full items, and rebuilds a
+// response.completed snapshot when the upstream omits earlier items.
+function createResponsesIndexRemapper() {
+  let nextSlot = 0;
+  const byIndex = new Map(); // original output_index -> { slot, id }
+  const byId = new Map();    // item id/call_id -> slot (unique per response)
+  const items = new Map();   // remapped slot -> full item (from output_item.done)
+  const identityOf = (parsed) => {
+    const item = parsed.item;
+    if (item && typeof item === "object") {
+      if (item.id) return item.id;
+      if (item.call_id) return item.call_id;
+      return null;
+    }
+    if (typeof parsed.item_id === "string" && parsed.item_id) return parsed.item_id;
+    if (typeof parsed.call_id === "string" && parsed.call_id) return parsed.call_id;
+    return null;
+  };
+  const remapEvent = (parsed) => {
+    const idx = parsed.output_index;
+    if (typeof idx !== "number") return;
+    const id = identityOf(parsed);
+    if (id && byId.has(id)) {
+      parsed.output_index = byId.get(id);
+      return;
+    }
+    const bound = byIndex.get(idx);
+    if (!bound) {
+      // Fresh original index → new item; preserve upstream numbering.
+      byIndex.set(idx, { slot: idx, id: id ?? null });
+      if (id) byId.set(id, idx);
+      if (idx >= nextSlot) nextSlot = idx + 1;
+      parsed.output_index = idx;
+      return;
+    }
+    if (!id || bound.id === null || bound.id === id) {
+      // Same item continuing (or unidentifiable delta) → keep its slot.
+      parsed.output_index = bound.slot;
+      return;
+    }
+    // Collision: same original index, different item identity → fresh slot.
+    const slot = nextSlot++;
+    byId.set(id, slot);
+    parsed.output_index = slot;
+  };
+  const captureItem = (parsed) => {
+    if (parsed.type !== "response.output_item.done") return;
+    const slot = parsed.output_index;
+    if (typeof slot === "number" && parsed.item && typeof parsed.item === "object") {
+      items.set(slot, parsed.item);
+    }
+  };
+  const rebuildSnapshot = (response) => {
+    if (!response || !Array.isArray(response.output) || items.size <= response.output.length) return;
+    response.output = [...items.entries()].sort((a, b) => a[0] - b[0]).map(([, item]) => item);
+  };
+  return { remapEvent, captureItem, rebuildSnapshot };
+}
+
+// Apply index remapping + item capture to a parsed Responses event (same-format
+// passthrough only). Terminal snapshots get their output array rebuilt when the
+// upstream omits earlier items.
+function remapResponsesOutputIndex(parsed, remap) {
+  if (!remap || !parsed || typeof parsed !== "object") return;
+  if (parsed.type === "response.created" || parsed.type === "response.in_progress") return;
+  remap.remapEvent(parsed);
+  remap.captureItem(parsed);
+  if (parsed.type === "response.completed" || parsed.type === "response.incomplete") {
+    remap.rebuildSnapshot(parsed.response);
+  }
+}
+
 /**
  * Stream modes
  */
@@ -74,6 +151,7 @@ export function createSSEStream(options = {}) {
   // Track Responses API event framing for same-format passthrough (codex)
   let currentOpenAIResponsesEvent = null;
   let openAIResponsesTerminalSeen = false;
+  const remapResponsesIndex = createResponsesIndexRemapper();
   let openAIResponsesDoneSent = false;
   let streamDoneSent = false;  // track duplicate [DONE] across transform + flush
   let finalized = false;
@@ -249,6 +327,14 @@ export function createSSEStream(options = {}) {
         // Responses API same-format passthrough: preserve event framing + track terminal state
         const isOpenAIResponsesStream = targetFormat === FORMATS.OPENAI_RESPONSES;
         const keepsOpenAIResponsesFormat = isOpenAIResponsesStream && sourceFormat === FORMATS.OPENAI_RESPONSES;
+        // Spark-hub-style upstreams restart output_index at 0 per output item and
+        // emit terminal snapshots missing earlier items. Remap indices per item
+        // identity (idempotent; pass-through for compliant upstreams) and rebuild
+        // terminal output arrays. Strict clients (OpenClaw) abort on index/identity
+        // collisions otherwise.
+        if (keepsOpenAIResponsesFormat && parsed) {
+          remapResponsesOutputIndex(parsed, remapResponsesIndex);
+        }
         const openAIResponsesEventName = isOpenAIResponsesStream
           ? getOpenAIResponsesEventName(currentOpenAIResponsesEvent, parsed)
           : null;
