@@ -30,6 +30,7 @@ import { stripUnsupportedModalities } from "../translator/concerns/modality.js";
 import { prefetchRemoteImages } from "../translator/concerns/prefetch.js";
 import { defaultClaudeToolType, shouldDefaultClaudeToolType } from "../translator/concerns/toolCall.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
+import { dumpToolCallIdDiagnostics } from "../utils/toolCallIdDiag.js";
 
 /**
  * Core chat handler - shared between SSE and Worker
@@ -466,6 +467,20 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     })).catch(() => { });
 
     const errMsg = formatProviderError(new Error(message), provider, model, statusCode);
+    // A tool-call id mismatch is invisible in the payload without help: dump the
+    // redacted id shapes (type/length/digest) of both the body we received and the
+    // body we sent, so the divergence point is identifiable from the container log.
+    if (statusCode === HTTP_STATUS.BAD_REQUEST || statusCode === 422
+      || /tool_call_id|tool_call\.id|does not match any/i.test(message || "")) {
+      await dumpToolCallIdDiagnostics({
+        clientBody: body,
+        upstreamBody: finalBody || translatedBody || null,
+        statusCode,
+        upstreamMessage: message,
+        provider,
+        model,
+      });
+    }
     if (log?.errorLine) {
       const urlStr = providerUrl ? `\n    URL: ${providerUrl}` : "";
       log.errorLine(reqTag, "✗", `ERROR ${statusCode} · ${provider}/${model} · ${Date.now() - requestStartTime}ms${urlStr}\n    ${errMsg}`);

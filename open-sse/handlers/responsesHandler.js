@@ -5,6 +5,7 @@
 
 import { handleChatCore } from "./chatCore.js";
 import { convertResponsesApiFormat } from "../translator/formats/responsesApi.js";
+import { dumpToolCallIdDiagnostics } from "../utils/toolCallIdDiag.js";
 import { createResponsesApiTransformStream } from "../transformer/responsesTransformer.js";
 import { convertResponsesStreamToJson } from "../transformer/streamToJsonConverter.js";
 import { SSE_HEADERS_CORS } from "../utils/sseConstants.js";
@@ -47,6 +48,15 @@ export async function handleResponsesCore({ body, modelInfo, credentials, log, o
   });
 
   if (!result.success || !result.response) {
+    // Dump the RAW Responses input (the shape the client actually sent) next to the
+    // converted chat body chatCore already reported — id shapes only, never content.
+    await dumpToolCallIdDiagnostics({
+      clientBody: body,
+      statusCode: result.status ?? null,
+      upstreamMessage: result.error || "",
+      provider: modelInfo?.provider || "",
+      model: modelInfo?.model || "",
+    });
     return result;
   }
 
