@@ -335,6 +335,11 @@ export const PATTERN_CAPABILITIES = [
   { pattern: "*kimi*k2*",       caps: { vision: true, reasoning: true, thinkingFormat: "kimi", contextWindow: 262144, maxOutput: 262144 } },
   { pattern: "*kimi*",          caps: { reasoning: true, thinkingFormat: "kimi", contextWindow: 262144 } },
 
+  // ── xh wrapper (星火社区 OpenAI Responses 透传层) ──
+  // xh 节点是 openai-compatible apiType=responses, 模型名 openai_huoshan_*
+  // 必须在 *glm* / *deepseek* 之前匹配, 否则会被误判为 zai/deepseek 原生格式
+  { pattern: "*openai_huoshan*", caps: { reasoning: true, thinkingFormat: "openai-responses", thinkingCanDisable: true, contextWindow: 200000, maxOutput: 128000 } },
+
   // ── GLM / Z.ai (thinking.enabled; disable via enable_thinking:false) ─
   // reasoning_effort is only read by z.ai from GLM-5.2 onward (docs.z.ai/guides/capabilities/thinking) —
   // older GLM (4.x, 5.0, 5.1, 5-turbo, 5v-turbo) ignore it, so gate it per exact version, not the "*glm-5*" catch-all.

@@ -33,6 +33,13 @@ const FORMAT_LEVELS = {
 
 const CODEX_GPT_5_6_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
+// xh (星火社区) huoshan wrapper models — OpenAI Responses wire, nested reasoning.
+// Level sets per Volcengine Ark native docs (probed 2026-09-11):
+//   huoshan_glm_5_2:              none/minimal/low/medium/high/xhigh/max (none/minimal = off)
+//   huoshan_deepseek_v4_flash_ga: minimal/low/medium/high/max (minimal = off)
+const XH_HUOSHAN_GLM_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+const XH_HUOSHAN_DS_LEVELS = ["minimal", "low", "medium", "high", "max"];
+
 // Model-name pattern overrides (glob, first match wins) — more precise than format default.
 const PATTERN_THINKING = [
   { provider: "codex", pattern: "*gpt-6*", levels: CODEX_GPT_5_6_LEVELS },
@@ -40,6 +47,10 @@ const PATTERN_THINKING = [
   { provider: "codex", pattern: "*gpt-5.6-terra*", levels: [...CODEX_GPT_5_6_LEVELS, "ultra"] },
   { provider: "codex", pattern: "*gpt-5.6-luna*", levels: CODEX_GPT_5_6_LEVELS },
   { pattern: "*codex*", levels: ["low", "medium", "high", "xhigh"] }, // codex cannot disable thinking
+  // xh huoshan wrapper families — first match wins, specific before generic.
+  { pattern: "openai_huoshan_glm_*",      levels: XH_HUOSHAN_GLM_LEVELS },
+  { pattern: "openai_huoshan_deepseek_*", levels: XH_HUOSHAN_DS_LEVELS },
+  { pattern: "openai_huoshan_*",          levels: L.openai },
   // codebuddy-cn per-model effort sets — the server's product-config payload
   // publishes `reasoning.supportedEfforts` per model. NOTE: the chat endpoint
   // accepts any level you send (probed none/minimal/low/medium/high/xhigh/max

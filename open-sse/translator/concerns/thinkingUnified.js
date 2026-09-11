@@ -6,6 +6,7 @@ import { getCapabilitiesForModel } from "../../providers/capabilities.js";
 import { getThinkingLevels } from "../../providers/thinkingLevels.js";
 import { PROVIDERS } from "../../providers/index.js";
 import { LEVEL_TO_BUDGET, budgetToLevel, effortToBudget, effortToThinkingLevel } from "./thinking.js";
+import { FORMATS } from "../formats.js";
 
 // Map a target wire-format to its native thinking format (when capability has none).
 const FORMAT_TO_NATIVE = {
@@ -112,6 +113,11 @@ function resolveFormat(targetFormat, model, provider) {
   if (providerFmt) return providerFmt;
   const caps = getCapabilitiesForModel(provider, model);
   const isOpenAIWire = targetFormat === "openai" || targetFormat === "openai-responses";
+  // A Responses-native thinking format only makes sense on the Responses wire;
+  // on a chat-wire target fall back to the chat-native flat format.
+  if (caps.thinkingFormat === "openai-responses" && targetFormat !== FORMATS.OPENAI_RESPONSES) {
+    return FORMAT_TO_NATIVE[targetFormat] || "openai";
+  }
   if (caps.thinkingFormat && !(isOpenAIWire && NATIVE_ONLY_FORMATS.has(caps.thinkingFormat))) {
     return caps.thinkingFormat;
   }
@@ -145,6 +151,21 @@ function normalizeOpenAILevel(level, supportedLevels) {
   if (supportedLevels?.includes(level)) return level;
   if (level === "ultra" && supportedLevels?.includes("max")) return "max";
   return "xhigh";
+}
+
+// Fit an effort level to a model's declared set on the Responses wire. Returns
+// null when the model has no equivalent (omit the field → upstream default).
+function clampResponsesEffort(level, supportedLevels) {
+  if (!level) return null;
+  if (!Array.isArray(supportedLevels) || supportedLevels.length === 0) return level;
+  if (supportedLevels.includes(level)) return level;
+  if (level === "none") return supportedLevels.includes("minimal") ? "minimal" : null;
+  if (level === "xhigh" || level === "ultra") {
+    return supportedLevels.includes("max") ? "max" : (supportedLevels.includes("high") ? "high" : null);
+  }
+  if (level === "max") return supportedLevels.includes("xhigh") ? "xhigh" : (supportedLevels.includes("high") ? "high" : null);
+  // Unknown/extra level: pass through and let the upstream decide.
+  return level;
 }
 
 function toGeminiThinkingLevel(cfg) {
@@ -233,6 +254,23 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels) {
   const eff = none && !canDisable ? { mode: "level", level: "minimal" } : cfg;
 
   switch (fmt) {
+    case "openai-responses": {
+      // OpenAI Responses wire: reasoning is nested { effort }. Flat chat-wire
+      // fields (thinking / reasoning_effort) are rejected 400 by Responses
+      // upstreams — e.g. the xh/Spark huoshan wrapper (probed 2026-09-11).
+      if (none && canDisable) {
+        const off = clampResponsesEffort("none", supportedLevels);
+        if (off) body.reasoning = { effort: off };
+        else delete body.reasoning;
+        break;
+      }
+      const level = toLevel(eff);
+      if (level && level !== "auto") {
+        const effort = clampResponsesEffort(level, supportedLevels);
+        if (effort) body.reasoning = { effort };
+      }
+      break;
+    }
     case "openai": {
       if (none && canDisable) { body.reasoning_effort = "none"; break; }
       const level = toLevel(eff);
