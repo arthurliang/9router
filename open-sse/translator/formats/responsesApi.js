@@ -134,6 +134,24 @@ export function convertResponsesApiFormat(body) {
       result.messages.push({ role: item.role, content });
     }
     else if (itemType === RESPONSES_ITEM.FUNCTION_CALL) {
+      // A new function_call group opens here. Pending outputs belong to the group that
+      // just closed, so flush them BEFORE this assistant message. Without this, the
+      // interleaved order a real agent turn uses for parallel calls
+      // (call/output/call/output) collapses into
+      //   [assistant(A), assistant(B), tool(A), tool(B)]
+      // and tool(A) no longer follows the assistant that declares its call id →
+      // upstream 400 "Tool message 'tool_call_id' does not match any 'tool_call.id'
+      // in the preceding assistant message".
+      if (pendingToolResults.length > 0) {
+        if (currentAssistantMsg) {
+          result.messages.push(currentAssistantMsg);
+          currentAssistantMsg = null;
+        }
+        for (const tr of pendingToolResults) {
+          result.messages.push(tr);
+        }
+        pendingToolResults = [];
+      }
       // Start or append to assistant message with tool_calls
       if (!currentAssistantMsg) {
         currentAssistantMsg = {

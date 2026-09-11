@@ -27,6 +27,14 @@ function sanitizeToolId(id) {
 export function ensureToolCallIds(body) {
   if (!body.messages || !Array.isArray(body.messages)) return body;
 
+  // Ids announced by the assistant batch the current tool messages belong to.
+  // Chat wire requires every role:"tool" message to carry an id declared by the
+  // preceding assistant message; a tool message with no usable id therefore takes
+  // its batch slot by position instead of being left empty (upstream otherwise
+  // answers 400 "Tool message 'tool_call_id' does not match any 'tool_call.id'").
+  let batchIds = [];
+  let toolSeen = 0;
+
   for (let i = 0; i < body.messages.length; i++) {
     const msg = body.messages[i];
     if (msg.role === "assistant" && msg.tool_calls && Array.isArray(msg.tool_calls)) {
@@ -45,12 +53,22 @@ export function ensureToolCallIds(body) {
           tc.function.arguments = JSON.stringify(tc.function.arguments);
         }
       }
-    }
-
-    // Validate tool_call_id in tool messages (role: "tool")
-    if (msg.role === "tool" && msg.tool_call_id && !TOOL_ID_PATTERN.test(msg.tool_call_id)) {
-      const sanitized = sanitizeToolId(msg.tool_call_id);
-      msg.tool_call_id = sanitized || generateToolCallId(i, 0);
+      batchIds = msg.tool_calls.map((tc) => tc.id);
+      toolSeen = 0;
+    } else if (msg.role === "tool") {
+      const announced = batchIds[toolSeen];
+      toolSeen += 1;
+      if (!msg.tool_call_id) {
+        // No id at all: inherit the batch slot shared with its assistant tool_call.
+        msg.tool_call_id = announced || generateToolCallId(i, 0);
+      } else if (!TOOL_ID_PATTERN.test(msg.tool_call_id)) {
+        const sanitized = sanitizeToolId(msg.tool_call_id);
+        msg.tool_call_id = sanitized || announced || generateToolCallId(i, 0);
+      }
+    } else {
+      // Any other role closes the batch window — stale ids must not leak into it.
+      batchIds = [];
+      toolSeen = 0;
     }
 
     // Also validate tool_use blocks in content (Claude format)
