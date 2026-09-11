@@ -341,6 +341,15 @@ export function openaiToOpenAIResponsesRequest(model, body, stream, credentials)
   // Extract system message as instructions
   let hasSystemMessage = false;
   const messages = body.messages || [];
+  // Upstream 400: "Tool message 'tool_call_id' does not match any 'tool_call.id' in
+  // the preceding assistant message". A tool call whose id is missing/empty/non-string
+  // has no stable clamp (clampResponsesCallId must stay unique per call), so the
+  // assistant item and its tool message each got a DIFFERENT fallback. Pair them by
+  // order instead: an unusable id gets one fallback id, queued and reused by the
+  // matching tool message of the same batch (FIFO). Usable string ids stay
+  // transparent — clamped for length only, never rewritten.
+  let fallbackCallIds = [];
+  const isUsableCallId = (id) => typeof id === "string" && id !== "";
 
   for (const msg of messages) {
     if (msg.role === ROLE.SYSTEM || msg.role === ROLE.DEVELOPER) {
@@ -397,13 +406,19 @@ export function openaiToOpenAIResponsesRequest(model, body, stream, credentials)
 
     // Convert tool calls
     if (msg.role === ROLE.ASSISTANT && msg.tool_calls) {
+      // A batch owns its own fallbacks: a leftover from a previous assistant
+      // message must never pair with this batch's tool results.
+      fallbackCallIds = [];
       for (const tc of msg.tool_calls) {
         // Skip nameless calls — strict Responses upstreams reject them (#444)
         const name = typeof tc.function?.name === "string" ? tc.function.name.trim() : "";
         if (!name) continue;
+        const usable = isUsableCallId(tc.id);
+        const callId = usable ? clampResponsesCallId(tc.id) : clampResponsesCallId(undefined);
+        if (!usable) fallbackCallIds.push(callId);
         result.input.push({
           type: RESPONSES_ITEM.FUNCTION_CALL,
-          call_id: clampResponsesCallId(tc.id),
+          call_id: callId,
           name: name.slice(0, MAX_TOOL_NAME_LEN),
           arguments: coerceResponsesArguments(tc.function?.arguments)
         });
@@ -412,9 +427,13 @@ export function openaiToOpenAIResponsesRequest(model, body, stream, credentials)
 
     // Convert tool results - output must be a string for Responses API
     if (msg.role === ROLE.TOOL) {
+      // Unusable tool_call_id reuses its assistant-side fallback (FIFO, same order).
+      // Usable ids pass through unchanged so a valid id always keeps its own pairing.
+      const usable = isUsableCallId(msg.tool_call_id);
+      const callId = usable ? clampResponsesCallId(msg.tool_call_id) : (fallbackCallIds.shift() ?? clampResponsesCallId(undefined));
       result.input.push({
         type: RESPONSES_ITEM.FUNCTION_CALL_OUTPUT,
-        call_id: clampResponsesCallId(msg.tool_call_id),
+        call_id: callId,
         output: coerceResponsesOutput(msg.content)
       });
     }
