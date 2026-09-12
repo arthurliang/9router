@@ -8,6 +8,29 @@ import { dbg, isDebugEnabled } from "./debugLog.js";
 
 import { SSE_DONE, SSE_HEADERS, SSE_HEADERS_NO_BUFFER } from "./sseConstants.js";
 
+// Probe formatter: reduces a Responses output item to type:id:content-metric so a
+// REBUILD-PROBE line exposes whether the upstream snapshot dropped or emptied the
+// assistant message while keeping the function_call (observed on spark-hub
+// responses wrappers: snapshot lists only the function_call; the message item that
+// carried the visible text is missing, so strict clients end up with an empty
+// response).
+export function describeResponsesItemForProbe(item) {
+  if (!item || typeof item !== "object") return "null";
+  const head = `${item.type}:${String(item.id ?? item.call_id ?? "?").slice(0, 10)}`;
+  if (item.type === "message" || item.type === "reasoning") {
+    const parts = Array.isArray(item.content) ? item.content : [];
+    const chars = parts.reduce((n, c) => n + (typeof c?.text === "string" ? c.text.length : 0), 0);
+    return `${head}:content=${chars}`;
+  }
+  if (item.type === "function_call") {
+    return `${head}:args=${String(item.arguments ?? "").length}`;
+  }
+  if (item.type === "function_call_output") {
+    return `${head}:out=${String(item.output ?? "").length}`;
+  }
+  return head;
+}
+
 export { COLORS, formatSSE };
 export { SSE_DONE, SSE_HEADERS, SSE_HEADERS_NO_BUFFER };
 
@@ -102,7 +125,7 @@ function createResponsesIndexRemapper() {
   const rebuildSnapshot = (response) => {
     if (!response || !Array.isArray(response.output) || items.size === 0) return;
     if (process.env.NINEROUTER_REMAP_DEBUG) {
-      console.error("[REBUILD-PROBE] items=" + [...items.entries()].map(([k, v]) => k + ":" + v.type + ":" + String(v.id).slice(0, 10)).join(",") + " | snapshot=" + response.output.map(o => o.type + ":" + String(o.id).slice(0, 10)).join(","));
+      console.error("[REBUILD-PROBE] items=" + [...items.entries()].map(([k, v]) => k + ":" + describeResponsesItemForProbe(v)).join(",") + " | snapshot=" + response.output.map(describeResponsesItemForProbe).join(","));
     }
     if (items.size === response.output.length &&
         [...items.values()].every((item, i) => response.output[i] === item || response.output[i]?.id === item.id)) return;
