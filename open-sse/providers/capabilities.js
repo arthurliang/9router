@@ -341,6 +341,14 @@ export const PATTERN_CAPABILITIES = [
   // ── xh wrapper (星火社区 OpenAI Responses 透传层) ──
   // xh 节点是 openai-compatible apiType=responses, 模型名 openai_huoshan_*
   // 必须在 *glm* / *deepseek* 之前匹配, 否则会被误判为 zai/deepseek 原生格式
+  //
+  // 以下两条来自《星火社区接口文档》的官方参数（两个模型的上下文窗口均为 1024k；
+  // 平台固定 max_tokens 分别 128000 / 384000）。contextWindow 取 1000000 而非 1024k：
+  // 与 OpenClaw 侧模型声明保持一致，且宁可略保守——声明偏高会让客户端推迟压缩，
+  // 直到撞上上游硬上限才失败（route.js 注释里记录的 372k→1.05M 误读教训）。
+  { pattern: "*openai_huoshan_deepseek*", caps: { reasoning: true, thinkingFormat: "openai-responses", thinkingCanDisable: true, contextWindow: 1000000, maxOutput: 384000 } },
+  { pattern: "*openai_huoshan_glm*",      caps: { reasoning: true, thinkingFormat: "openai-responses", thinkingCanDisable: true, contextWindow: 1000000, maxOutput: 128000 } },
+  // 该族其余/未来模型保持原兜底，避免未知模型被误报成大窗口
   { pattern: "*openai_huoshan*", caps: { reasoning: true, thinkingFormat: "openai-responses", thinkingCanDisable: true, contextWindow: 200000, maxOutput: 128000 } },
 
   // ── GLM / Z.ai (thinking.enabled; disable via enable_thinking:false) ─

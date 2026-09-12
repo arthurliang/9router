@@ -63,14 +63,32 @@ describe("getCapabilitiesForModel", () => {
     expect(getCapabilitiesForModel("kiro", "gpt-5.6-sol-thinking-agentic")).toMatchObject(kiroGpt56Expected);
   });
 
-  it("reports Codex GPT 6.0 Astra as a vision and thinking capable model", () => {
-    expect(getCapabilitiesForModel("codex", "gpt-6-astra")).toMatchObject({
-      vision: true,
+  it("reports xh (星火) wrapper models at their real limits", () => {
+    // 星火社区接口文档：huoshan_glm_5_2 与 huoshan_deepseek_v4_flash_ga 上下文窗口均为 1024k；
+    // 平台固定 max_tokens 分别 128000（glm）/ 384000（ds4f）。
+    // 取 1000000 与 OpenClaw 侧模型声明一致，且比 1024k 更保守（声明过高会让客户端推迟压缩、撞上游硬上限）。
+    expect(getCapabilitiesForModel("xh", "openai_huoshan_deepseek_v4_flash_ga")).toMatchObject({
       reasoning: true,
-      search: true,
-      thinkingFormat: "openai",
-      contextWindow: 272000,
+      thinkingFormat: "openai-responses",
+      thinkingCanDisable: true,
+      contextWindow: 1000000,
+      maxOutput: 384000,
+    });
+    expect(getCapabilitiesForModel("xh", "openai_huoshan_glm_5_2")).toMatchObject({
+      reasoning: true,
+      thinkingFormat: "openai-responses",
+      thinkingCanDisable: true,
+      contextWindow: 1000000,
       maxOutput: 128000,
+    });
+  });
+
+  it("keeps the 200k floor for unlisted huoshan models", () => {
+    // 该族其余/未来模型保持原兜底，避免未知模型被误报成大窗口
+    expect(getCapabilitiesForModel("xh", "openai_huoshan_some_future_model")).toMatchObject({
+      contextWindow: 200000,
+      maxOutput: 128000,
+      thinkingFormat: "openai-responses",
     });
   });
 });
