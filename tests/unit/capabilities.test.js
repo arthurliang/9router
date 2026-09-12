@@ -83,6 +83,22 @@ describe("getCapabilitiesForModel", () => {
     });
   });
 
+  it("reports the local aiserver qwen3.8-27b deployment with vision and its real window", () => {
+    // aiserver = club-3090 vllm/qwen38-27b-dual-ultrafast（TP=2, --max-model-len 204800）。
+    // 2026-09-12 实测：vision 可用（4/4 shapes、magenta 单色图答对、无图对照答 Unknown）。
+    // 窗口必须写实 204800——落 *qwen* 兜底的 262144 会让客户端推迟压缩后撞上游硬上限。
+    expect(getCapabilitiesForModel("aiserver", "qwen3.8-27b")).toMatchObject({
+      vision: true,
+      reasoning: true,
+      thinkingFormat: "qwen",
+      thinkingCanDisable: true,
+      contextWindow: 204800,
+      maxOutput: 65536,
+    });
+    // vendor 前缀由 baseModel 归一化后同样命中
+    expect(getCapabilitiesForModel("aiserver", "aiserver/qwen3.8-27b").contextWindow).toBe(204800);
+  });
+
   it("keeps the 200k floor for unlisted huoshan models", () => {
     // 该族其余/未来模型保持原兜底，避免未知模型被误报成大窗口
     expect(getCapabilitiesForModel("xh", "openai_huoshan_some_future_model")).toMatchObject({

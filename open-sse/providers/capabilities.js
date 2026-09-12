@@ -120,6 +120,14 @@ export const MODEL_CAPABILITIES = {
   "vision-model":      { vision: true, reasoning: true, thinkingFormat: "qwen", contextWindow: 1000000 },
   "coder-model":       { reasoning: true, thinkingFormat: "qwen", contextWindow: 1000000 },
 
+  // 本地 aiserver 部署（club-3090 vllm/qwen38-27b-dual-ultrafast, TP=2, KL: --max-model-len 204800）。
+  // 2026-09-12 实测（port 8014）：vision 可用——shapes 资产 4/4 全对、magenta 单色图答 "Magenta"、
+  // 无图对照答 "Unknown"（内容相关，非幻觉）。
+  // ⚠️ contextWindow 必须写实测部署的 204800，不能落 *qwen* 兜底的 262144：该 slug 的 bf16 KV
+  // KV 池上限约 213K，声明偏高会让客户端推迟压缩、撞上游硬上限才失败（同 f9d950a0 家族教训）。
+  // videoInput 未实测，不声明；maxOutput 沿用该族 65536。
+  "qwen3.8-27b":       { vision: true, reasoning: true, thinkingFormat: "qwen", thinkingCanDisable: true, contextWindow: 204800, maxOutput: 65536 },
+
   // Kimi flagship + coding (platform + Kimi Code ids) — vision/video native
   "kimi-k3":           { vision: true, videoInput: true, reasoning: true, thinkingFormat: "kimi", thinkingCanDisable: false, contextWindow: 1048576, maxOutput: 131072 },
   "k3":                { vision: true, videoInput: true, reasoning: true, thinkingFormat: "kimi", thinkingCanDisable: false, contextWindow: 1048576, maxOutput: 131072 },
