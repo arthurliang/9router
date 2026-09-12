@@ -1,5 +1,5 @@
 import { FORMATS } from "./formats.js";
-import { ensureToolCallIds, fixMissingToolResponses } from "./concerns/toolCall.js";
+import { ensureToolCallIds, fixMissingToolResponses, interleaveResponsesToolPairs } from "./concerns/toolCall.js";
 import { prepareClaudeRequest } from "./formats/claude.js";
 import { cloakClaudeTools, decloakStreamChunk } from "../utils/claudeCloaking.js";
 import { filterToOpenAIFormat } from "./formats/openai.js";
@@ -61,6 +61,13 @@ export function translateRequest(sourceFormat, targetFormat, model, body, stream
 
   // Always ensure tool_calls have id (some providers require it)
   ensureToolCallIds(result);
+
+  // Responses targets validate each function_call_output against the immediately
+  // preceding assistant turn, so a grouped parallel batch must be interleaved before
+  // it leaves for the upstream (see interleaveResponsesToolPairs).
+  if (targetFormat === FORMATS.OPENAI_RESPONSES) {
+    interleaveResponsesToolPairs(result);
+  }
   
   // Kiro performs stricter source-aware reconciliation after session replay.
   // The generic helper inserts OpenAI `role: tool` messages, which a direct

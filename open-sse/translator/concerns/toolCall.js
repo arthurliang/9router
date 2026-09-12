@@ -198,3 +198,57 @@ export function shouldDefaultClaudeToolType(provider, finalFormat, tools, PROVID
   );
 }
 
+// Responses wire: every function_call must be followed by the function_call_output(s)
+// that answer it. A grouped batch (call,call,…,out,out) leaves outputs 2..n standing
+// behind no matching call, and Responses wrappers that pivot to the chat wire validate
+// each tool message against the *immediately preceding* assistant message — the turn
+// then dies with "Tool message 'tool_call_id' does not match any 'tool_call.id'" (emitted
+// as a response.failed event on an HTTP 200 stream, so HTTP-level checks never see it).
+// Interleave each call with its own outputs; messages, reasoning and orphan outputs keep
+// their original position.
+export function interleaveResponsesToolPairs(body) {
+  if (!body || !Array.isArray(body.input)) return body;
+  const input = body.input;
+
+  const declaredCalls = new Set();
+  for (const item of input) {
+    if (item?.type === "function_call" && typeof item.call_id === "string" && item.call_id) {
+      declaredCalls.add(item.call_id);
+    }
+  }
+  if (declaredCalls.size === 0) return body;
+
+  const outputsByCall = new Map();
+  for (const item of input) {
+    if (item?.type !== "function_call_output") continue;
+    const callId = typeof item.call_id === "string" ? item.call_id : "";
+    if (!declaredCalls.has(callId)) continue;
+    if (!outputsByCall.has(callId)) outputsByCall.set(callId, []);
+    outputsByCall.get(callId).push(item);
+  }
+  if (outputsByCall.size === 0) return body;
+
+  const emitted = new Set();
+  const out = [];
+  for (const item of input) {
+    if (item?.type === "function_call_output") {
+      const callId = typeof item.call_id === "string" ? item.call_id : "";
+      if (declaredCalls.has(callId)) continue;   // re-emitted right after its call
+      out.push(item);                            // orphan output stays in place
+      continue;
+    }
+    out.push(item);
+    if (item?.type !== "function_call") continue;
+    const answers = outputsByCall.get(item.call_id);
+    if (!answers) continue;
+    for (const answer of answers) {
+      if (emitted.has(answer)) continue;
+      emitted.add(answer);
+      out.push(answer);
+    }
+  }
+
+  body.input = out;
+  return body;
+}
+
